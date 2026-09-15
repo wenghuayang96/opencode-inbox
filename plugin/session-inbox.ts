@@ -246,26 +246,28 @@ async function notify(title: string, body: string): Promise<void> {
 /** 按窗口标题聚焦终端窗口，成功返回应用名，失败返回 null */
 async function focusWindowByTitle(match: string): Promise<string | null> {
   const m = osaEscape(match)
+  // Ghostty 经 open -na 打开的会话各占一个独立实例，必须扫描全部同名进程
   const script = `
 tell application "System Events"
   repeat with procName in {"Ghostty", "iTerm2", "Terminal", "Warp"}
-    try
-      set targetName to procName as text
-      tell (first application process whose name is targetName)
-        repeat with w in windows
-          try
-            set winName to name of w
-            if winName is not missing value then
-              if winName contains "${m}" then
-                perform action "AXRaise" of w
-                set frontmost to true
-                return "focused:" & targetName
-              end if
+    set targetName to procName as text
+    repeat with p in (application processes whose name is targetName)
+      repeat with w in windows of p
+        try
+          set winName to name of w
+          if winName is not missing value then
+            if winName contains "${m}" then
+              try
+                set value of attribute "AXMinimized" of w to false
+              end try
+              perform action "AXRaise" of w
+              set frontmost of p to true
+              return "focused:" & targetName
             end if
-          end try
-        end repeat
-      end tell
-    end try
+          end if
+        end try
+      end repeat
+    end repeat
   end repeat
   return ""
 end tell`
@@ -286,12 +288,15 @@ async function openSessionWindow(item: InboxItem): Promise<{ ok: boolean; method
     if (app) return { ok: true, method: `已聚焦 ${app} 原窗口` }
   }
   // 回退 1：新开 Ghostty 窗口 attach 会话
+  // --working-directory 必须用 = 赋值：空格分隔会被 Ghostty 当成无值配置项，每次弹 Configuration Errors
+  const dirArgs = item.dir ? [`--working-directory=${item.dir}`] : []
   try {
-    await run("open", [
-      "-na", "Ghostty", "--args",
-      "--working-directory", item.dir,
-      "-e", "opencode", "--session", item.id,
-    ])
+    await run("open", ["-na", "Ghostty", "--args", ...dirArgs, "-e", "opencode", "--session", item.id])
+    if (item.title.length >= 3) {
+      // 新窗口可能最小化落地，等它建好再抬到最前
+      await new Promise((r) => setTimeout(r, 800))
+      await focusWindowByTitle(item.title)
+    }
     return { ok: true, method: "已在新 Ghostty 窗口打开会话" }
   } catch {
     // 继续
