@@ -23,7 +23,7 @@ cat > "$APP/Contents/Info.plist" <<'EOF'
 <plist version="1.0">
 <dict>
 	<key>CFBundleExecutable</key><string>OCInbox</string>
-	<key>CFBundleIdentifier</key><string>com.wenghuayang.oc-inbox</string>
+	<key>CFBundleIdentifier</key><string>com.wenghuayang.opencode-inbox</string>
 	<key>CFBundleName</key><string>OC 收件箱</string>
 	<key>CFBundleDisplayName</key><string>OC 收件箱</string>
 	<key>CFBundleIconFile</key><string>AppIcon</string>
