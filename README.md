@@ -8,8 +8,10 @@
 
 | 组件 | 说明 |
 |---|---|
-| `plugin/session-inbox.ts` | opencode 插件（单文件 TS）。hook `session.idle` / `session.error`，抓取会话标题、你最后一句提问与最后一条 assistant 回复生成摘要，连同工作目录一并写入本机 JSON 收件箱；内置 HTTP 服务提供网页版收件箱 + API；App 不在线时兜底发 osascript 通知 |
+| `plugin/session-inbox.ts` | opencode 插件（单文件 TS）。hook `session.idle` / `session.error`，抓取会话标题与最后一条 assistant 回复生成摘要，写入本机 JSON 收件箱；内置 HTTP 服务提供网页版收件箱 + API；App 不在线时兜底发 osascript 通知 |
 | `app/main.swift` | macOS 菜单栏应用（纯 AppKit + UserNotifications）。轮询收件箱 → 发可点击系统通知（点击打开收件箱网页）→ 菜单栏托盘图标 + 未读数字角标；菜单内条目点击直接跳转会话窗口 |
+| `app/icon-gen.swift` | 构建时自动生成应用图标（AppKit 绘制 → iconutil 转 .icns），无需图标素材文件 |
+| `app/dev-identity.sh` | 一次性创建本地自签名代码签名证书（无需 Apple 开发者账号），固定签名身份，保证 Finder/启动台图标稳定 |
 
 ```
 opencode 会话完成 ──▶ 插件写入 ~/.local/share/opencode/session-inbox.json
@@ -36,12 +38,15 @@ cd opencode-inbox
 mkdir -p ~/.config/opencode/plugins
 cp plugin/session-inbox.ts ~/.config/opencode/plugins/
 
-# 2. 编译安装菜单栏 App
+# 2. （推荐）创建本地签名证书，首次签名时会弹钥匙串授权，点「始终允许」
+chmod +x app/dev-identity.sh && app/dev-identity.sh
+
+# 3. 编译安装菜单栏 App（自动生成图标）
 chmod +x app/build.sh && app/build.sh
 
-# 3. 重启所有已开着的 opencode 窗口（插件只在进程启动时加载）
+# 4. 重启所有已开着的 opencode 窗口（插件只在进程启动时加载）
 
-# 4. 启动 App
+# 5. 启动 App
 open ~/Applications/OC收件箱.app
 #    首次启动会请求通知权限，点「允许」
 ```
