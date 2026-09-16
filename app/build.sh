@@ -14,8 +14,6 @@ APP="$HOME/Applications/OC收件箱.app"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp OCInbox "$APP/Contents/MacOS/OCInbox"
 iconutil -c icns AppIcon.iconset -o "$APP/Contents/Resources/AppIcon.icns"
-# 通知附件用的 PNG（横幅图标走附件才稳定显示）
-cp AppIcon.iconset/icon_256x256.png "$APP/Contents/Resources/NotifyIcon.png"
 
 cat > "$APP/Contents/Info.plist" <<'EOF'
 <?xml version="1.0" encoding="UTF-8"?>

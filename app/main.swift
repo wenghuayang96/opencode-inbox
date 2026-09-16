@@ -181,11 +181,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         content.threadIdentifier = item.project
         content.userInfo = ["id": item.id]
         content.sound = UNNotificationSound(named: UNNotificationSoundName("Glass.aiff"))
-        // 未公证 app 的横幅图标会被通知守护进程缓存成占位图，把图标作为附件携带才能稳定显示
-        if let iconURL = Bundle.main.url(forResource: "NotifyIcon", withExtension: "png"),
-           let att = try? UNNotificationAttachment(identifier: "appicon", url: iconURL, options: nil) {
-            content.attachments = [att]
-        }
         let req = UNNotificationRequest(identifier: item.id, content: content, trigger: nil)
         UNUserNotificationCenter.current().add(req) { error in
             log("通知[\(item.title)] \(error.map { "失败: \($0.localizedDescription)" } ?? "已发送")")
