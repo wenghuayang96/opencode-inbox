@@ -349,6 +349,7 @@ const PAGE_HTML = `<!doctype html>
     border-radius: 8px; padding: 5px 12px; font-size: 12px; cursor: pointer;
   }
   button:hover { color: var(--text); border-color: var(--muted); }
+  button.on { color: var(--accent); border-color: var(--accent); background: #4f8cff1a; }
   #banner {
     display: none; background: #3d1d20; color: #ffb3ad; border: 1px solid #f8514955;
     padding: 10px 14px; border-radius: 10px; margin-bottom: 12px;
@@ -404,6 +405,7 @@ const PAGE_HTML = `<!doctype html>
   <h1>OpenCode 会话收件箱</h1>
   <span class="pill zero" id="pill">0</span>
   <span class="spacer"></span>
+  <button id="unread">只显示未读</button>
   <button id="readall">全部已读</button>
   <button id="clear">清空</button>
 </header>
@@ -411,11 +413,12 @@ const PAGE_HTML = `<!doctype html>
 <div id="list"></div>
 <div class="empty" id="empty" style="display:none">
   <div class="big">( )</div>
-  暂无记录。各窗口每完成一轮回复，就会出现在这里。
+  <div id="emptyText">暂无记录。各窗口每完成一轮回复，就会出现在这里。</div>
 </div>
 <footer>session-inbox · 127.0.0.1:47832 · 数据保存在本地 session-inbox.json</footer>
 <script>
 var lastTimes = {};
+var unreadOnly = false;
 function fmtRel(t) {
   var d = new Date(t), now = new Date();
   var diff = (now.getTime() - t) / 1000;
@@ -440,8 +443,13 @@ function render(data) {
   var empty = document.getElementById("empty");
   empty.style.display = items.length ? "none" : "block";
   var unreadTotal = 0;
-  items.forEach(function (it) {
-    unreadTotal += it.unread;
+  items.forEach(function (it) { unreadTotal += it.unread; });
+  var shown = unreadOnly ? items.filter(function (it) { return it.unread > 0; }) : items;
+  empty.style.display = shown.length ? "none" : "block";
+  document.getElementById("emptyText").textContent = unreadOnly && items.length
+    ? "没有未读条目 🎉"
+    : "暂无记录。各窗口每完成一轮回复，就会出现在这里。";
+  shown.forEach(function (it) {
     var card = el("div", "item" + (it.time > (lastTimes[it.id] || 0) && lastTimes[it.id] !== undefined ? " flash" : ""));
     lastTimes[it.id] = it.time;
     var row1 = el("div", "row1");
@@ -494,6 +502,11 @@ document.getElementById("list").addEventListener("click", async function (ev) {
     refresh();
   }
 });
+document.getElementById("unread").onclick = function () {
+  unreadOnly = !unreadOnly;
+  this.classList.toggle("on", unreadOnly);
+  refresh();
+};
 document.getElementById("readall").onclick = async function () { await post("/api/read-all"); refresh(); };
 document.getElementById("clear").onclick = async function () { await post("/api/clear"); refresh(); };
 setInterval(refresh, 2000);
