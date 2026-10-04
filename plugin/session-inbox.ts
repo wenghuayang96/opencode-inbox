@@ -215,6 +215,23 @@ async function markRead(id: string, all = false): Promise<void> {
   if (dirty) await writeStore(items)
 }
 
+/** 同步标已读：与 upsertSync 同款的读-改-写-改名，供自动已读路径使用（宿主进程可能随即退出） */
+function markReadSync(ids: string[]): void {
+  const want = new Set(ids)
+  const items = readStoreSync()
+  let dirty = false
+  for (const it of items) {
+    if (want.has(it.id) && it.unread !== 0) {
+      it.unread = 0
+      dirty = true
+    }
+  }
+  if (!dirty) return
+  const tmp = DATA_FILE + ".tmp"
+  writeFileSync(tmp, JSON.stringify(items, null, 2), "utf8")
+  renameSync(tmp, DATA_FILE)
+}
+
 // ---------- macOS 通知 / 窗口聚焦 ----------
 
 /** 菜单栏 App（OC收件箱.app）存活心跳：新鲜说明 App 会自己弹可点击通知，插件跳过 osascript 防止双重通知 */
@@ -279,6 +296,60 @@ end tell`
     // 无辅助功能权限等情况
   }
   return null
+}
+
+/** 参与窗口标题匹配的候选（≥3 字符才查，与 openSessionWindow 同一规则） */
+function titleCandidates(...names: Array<string | undefined>): string[] {
+  return names.filter((s): s is string => !!s && s.length >= 3)
+}
+
+/**
+ * 只读查询：前台进程聚焦窗口（AXFocusedWindow）的标题命中哪些候选。
+ * 只用 AXFocusedWindow 而非"前台进程任一窗口"——同一终端进程可托管多个窗口，
+ * 后台窗口命中不代表用户正在看。无任何聚焦/唤醒副作用；无权限或异常时返回 []。
+ */
+function buildFrontmostScanScript(candidates: string[]): string {
+  const checks = candidates
+    .map((c, i) => `        if winName contains "${osaEscape(c)}" then set acc to acc & " ${i}"`)
+    .join("\n")
+  return `
+tell application "System Events"
+  try
+    set frontProc to first application process whose frontmost is true
+  on error
+    return ""
+  end try
+  try
+    set fw to value of attribute "AXFocusedWindow" of frontProc
+  on error
+    return ""
+  end try
+  if fw is missing value then return ""
+  set acc to ""
+  try
+    set winName to name of fw
+    if winName is not missing value then
+${checks}
+    end if
+  end try
+  return acc
+end tell`
+}
+
+/** 命中候选的下标数组（去重）；失败静默返回 [] */
+async function scanFrontmostWindow(candidates: string[]): Promise<number[]> {
+  if (candidates.length === 0) return []
+  try {
+    const { stdout } = await run("osascript", ["-e", buildFrontmostScanScript(candidates)])
+    return [...new Set(stdout.trim().split(/\s+/).filter(Boolean).map(Number).filter((n) => !Number.isNaN(n)))]
+  } catch {
+    return []
+  }
+}
+
+/** 会话窗口是否正被用户盯着（前台聚焦窗口标题命中任一候选） */
+async function sessionWindowFocused(candidates: string[]): Promise<boolean> {
+  return (await scanFrontmostWindow(candidates)).length > 0
 }
 
 async function openSessionWindow(item: InboxItem): Promise<{ ok: boolean; method: string }> {
@@ -516,6 +587,46 @@ refresh();
 </body>
 </html>`
 
+// ---------- 自动已读清扫：聚焦窗口盯着某会话时，其未读条目顺手标已读 ----------
+
+let sweepRunning = false
+
+/**
+ * 搭车 /api/items 的轮询：有未读项时查一次前台聚焦窗口标题，
+ * 命中的条目标已读（用户自己走到窗口前看了，收件箱不该再记红点）。
+ * 单次一发 osascript 批量查所有候选；扫描期间不重复进入。
+ */
+function sweepFocusedUnread(items: InboxItem[]): void {
+  if (sweepRunning) return
+  const unread = items.filter((it) => it.unread > 0)
+  if (unread.length === 0) return
+  const candidates: string[] = []
+  const owner: number[] = [] // 候选下标 → unread 下标
+  unread.forEach((it, i) => {
+    for (const c of titleCandidates(it.title, it.project)) {
+      candidates.push(c)
+      owner.push(i)
+    }
+  })
+  if (candidates.length === 0) return
+  sweepRunning = true
+  void (async () => {
+    try {
+      const hits = await scanFrontmostWindow(candidates)
+      const ids = new Set<string>()
+      for (const h of hits) {
+        const it = unread[owner[h]]
+        if (it) ids.add(it.id)
+      }
+      if (ids.size > 0) markReadSync([...ids])
+    } catch {
+      // 扫描失败静默，下轮轮询自愈
+    } finally {
+      sweepRunning = false
+    }
+  })()
+}
+
 // ---------- HTTP 服务 ----------
 let serverOwned = false
 
@@ -561,7 +672,9 @@ function startServer(client: ApiClient): void {
         return json(res, 200, { ok: true })
       }
       if (req.method === "GET" && url === "/api/items") {
-        return json(res, 200, { items: await readStore() })
+        const items = await readStore()
+        sweepFocusedUnread(items)
+        return json(res, 200, { items })
       }
       if (req.method === "POST" && url === "/api/read") {
         const body = await readJsonBody(req)
@@ -679,6 +792,11 @@ async function handleIdle(client: ApiClient, sessionID: string, project: string,
   const prompt = promptOf(exchange.user)
   upsertSync({ id: sessionID, title, project, dir: directory, prompt, summary, status: "done", time: Date.now() })
   void ensureServer(client)
+  // 用户正盯着该会话窗口：直接已读落盘，不弹通知
+  if (await sessionWindowFocused(titleCandidates(title, project))) {
+    markReadSync([sessionID])
+    return
+  }
   notifyDebounced(sessionID, `${project} · ${title}`, prompt ? `你：${prompt}\n${summary}` : summary)
 }
 
@@ -704,6 +822,11 @@ async function handleError(
     time: Date.now(),
   })
   await ensureServer(client)
+  // 出错同理：正盯着窗口就直接已读，不弹通知
+  if (await sessionWindowFocused(titleCandidates(title, project))) {
+    markReadSync([sessionID])
+    return
+  }
   await notify(`${project} · ${title}`, `会话出错：${message || "未知错误"}`)
 }
 
