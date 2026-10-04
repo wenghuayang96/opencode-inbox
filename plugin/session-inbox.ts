@@ -590,16 +590,19 @@ refresh();
 // ---------- 自动已读清扫：聚焦窗口盯着某会话时，其未读条目顺手标已读 ----------
 
 let sweepRunning = false
+let lastSweepAt = 0
+const SWEEP_MIN_INTERVAL_MS = 5000
 
 /**
  * 搭车 /api/items 的轮询：有未读项时查一次前台聚焦窗口标题，
  * 命中的条目标已读（用户自己走到窗口前看了，收件箱不该再记红点）。
- * 单次一发 osascript 批量查所有候选；扫描期间不重复进入。
+ * 单次一发 osascript 批量查所有候选；扫描期间不重复进入，两次扫描至少间隔 SWEEP_MIN_INTERVAL_MS。
  */
 function sweepFocusedUnread(items: InboxItem[]): void {
   if (sweepRunning) return
   const unread = items.filter((it) => it.unread > 0)
   if (unread.length === 0) return
+  if (Date.now() - lastSweepAt < SWEEP_MIN_INTERVAL_MS) return
   const candidates: string[] = []
   const owner: number[] = [] // 候选下标 → unread 下标
   unread.forEach((it, i) => {
@@ -610,6 +613,7 @@ function sweepFocusedUnread(items: InboxItem[]): void {
   })
   if (candidates.length === 0) return
   sweepRunning = true
+  lastSweepAt = Date.now()
   void (async () => {
     try {
       const hits = await scanFrontmostWindow(candidates)
